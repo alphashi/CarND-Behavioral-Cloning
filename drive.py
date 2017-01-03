@@ -3,9 +3,9 @@ import base64
 import json
 
 import numpy as np
-#import socketio
-#import eventlet
-#import eventlet.wsgi
+import socketio
+import eventlet
+import eventlet.wsgi
 import time
 from PIL import Image
 from PIL import ImageOps

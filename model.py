@@ -1,11 +1,12 @@
 import os
 import pandas as pd
 import numpy as np
+import json
 import matplotlib.pyplot as plt
 import cv2
 from keras.models import Sequential
 from keras.optimizers import Adam
-import scipy
+from keras.callbacks import EarlyStopping, ModelCheckpoint
 from keras.layers import Convolution2D, ELU, Flatten, Dense, Dropout, Lambda, Input
 
 import tensorflow as tf
@@ -20,6 +21,7 @@ CAMERA_R_IDX = 2
 ANGLE_IDX = 3
 
 DATASET = "./dataset"
+OUTPUTS = "./outputs"
 
 # only center camera is used
 GEN_MODE_CENTER = 0
@@ -67,6 +69,8 @@ def data_generator(data, mode = GEN_MODE_CENTER, batch_size = 32, preprocess_inp
         left = item.get('left')
         right = item.get('right')
 
+        # read images and generate augmented images into the buffer
+
         if mode == GEN_MODE_CENTER:
             path = os.path.join(DATASET, center)
             img = cv2.imread(path)
@@ -86,14 +90,31 @@ def data_generator(data, mode = GEN_MODE_CENTER, batch_size = 32, preprocess_inp
 
         buffer_size = len(x_buffer)
 
-        if buffer_size > 0:
-            x_b = np.stack(x_buffer, axis=0)
-            y_b = np.stack(y_buffer, axis=0)
-            for x, y in zip(x_b, y_b):
-                x = preprocess_input(x)
-                x = np.expand_dims(x, axis=0)
-                y = np.expand_dims(y, axis=0)
-                yield x, y
+        # drain the buffer
+
+        if buffer_size >= batch_size:
+            num_batches = int(buffer_size / batch_size)
+            head = num_batches * batch_size
+            tail = buffer_size - head
+            indx = list(range(head))
+            if shuffle:
+                np.random.shuffle(indx)
+
+            preprocessed_x = [preprocess_input(im) for im in x_buffer[:head]]
+            x = np.stack(preprocessed_x, axis=0)
+            y = np.stack(y_buffer[:head], axis=0)
+
+            for b in range(num_batches):
+                start = b * batch_size
+                end = (b+1) * batch_size
+                batch_x = x[indx[start:end]]
+                batch_y = y[indx[start:end]]
+                yield batch_x, batch_y
+
+            if tail > 0:
+                x_buffer = x_buffer[head:]
+                y_buffer = y_buffer[head:]
+
 
 def nvidia_model():
     input_shape = (image_rows, image_columns, image_channels)
@@ -166,7 +187,7 @@ if __name__ == '__main__':
 
     data = pd.read_csv(os.path.join(DATASET, "driving_log.csv"))
 
-    train_genereator = data_generator(data, GEN_MODE_CENTER, preprocess_input=preproccess)
+    train_genereator = data_generator(data, GEN_MODE_CENTER, preprocess_input=preproccess, batch_size=BATCH_SIZE)
 
     model = nvidia_model()
     adam = Adam(lr=1e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
@@ -176,13 +197,23 @@ if __name__ == '__main__':
 
     #model.summary()
 
-    model.fit_generator(train_genereator, samples_per_epoch=len(data), nb_epoch=4)
+    nb_train = len(data)
+    samples_adj = BATCH_SIZE - (nb_train % BATCH_SIZE) if nb_train % BATCH_SIZE > 0 else 0
+    samples_per_epoch = nb_train + samples_adj
+    model.fit_generator(train_genereator, samples_per_epoch=samples_per_epoch, nb_epoch=EPOCHS, verbose=1,
+                        )#callbacks=callbacks)
 
     # x,y = next(train_genereator)
     # plt.figure(figsize=(32, 8))
     # a = x[0].shape
     # plt.imshow(x[0])
     # plt.show()
+    print("Saving model weights and configuration file.")
 
-    print("End")
+    if not os.path.exists(OUTPUTS):
+        os.makedirs(OUTPUTS)
+
+    model.save_weights(os.path.join(OUTPUTS, "nvidia.h5"), True)
+    with open(os.path.join(OUTPUTS, "nvidia.json"), 'w') as outfile:
+        json.dump(model.to_json(), outfile)
 
