@@ -1,19 +1,18 @@
 import os
 import pandas as pd
 import numpy as np
-import json
 import matplotlib.pyplot as plt
 import cv2
 from keras.models import Sequential
 from keras.optimizers import Adam
-from keras.callbacks import EarlyStopping, ModelCheckpoint
+from keras.preprocessing.image import ImageDataGenerator
 from keras.layers import Convolution2D, ELU, Flatten, Dense, Dropout, Lambda, Input
 
 import tensorflow as tf
 tf.python.control_flow_ops = tf
 
-EPOCHS = 5
-BATCH_SIZE = 128
+EPOCHS = 10
+BATCH_SIZE = 256
 
 CAMERA_C_IDX = 0
 CAMERA_L_IDX = 1
@@ -21,7 +20,6 @@ CAMERA_R_IDX = 2
 ANGLE_IDX = 3
 
 DATASET = "./dataset"
-OUTPUTS = "./outputs"
 
 # only center camera is used
 GEN_MODE_CENTER = 0
@@ -34,27 +32,58 @@ image_columns = 200
 image_rows = 66
 image_channels = 3
 
+
 def normalize_input(x):
     return x / 255. - 0.5
+
 
 def resize_input(x):
     cropped = x[66:152, 30:290,:]
     resized = cv2.resize(cropped, (200,66))
     return resized
 
+
 def preproccess(x):
     img = resize_input(x)
     img = normalize_input(img)
     return img
 
+
 def passthrough(x):
     return x
 
-def augment_angle(center, left, right, angle):
-    return []
+
+def augment_angle(center, left, right, angle, shift):
+    images, angles = [], []
+    images.append(center)
+    angles.append(angle)
+    images.append(left)
+    angles.append(angle + shift)
+    images.append(right)
+    angles.append(angle - shift)
+    return images, angles
+
 
 def augment_generate(center, left, right, angle):
     return []
+
+
+def trans_image(image, steer, trans_range):
+    # Translation
+    tr_x = trans_range * np.random.uniform() - trans_range / 2
+    steer_ang = steer + tr_x / trans_range * 2 * .2
+    tr_y = 40 * np.random.uniform() - 40 / 2
+    # tr_y = 0
+    Trans_M = np.float32([[1, 0, tr_x], [0, 1, tr_y]])
+    image_tr = cv2.warpAffine(image, Trans_M, (image_columns, image_rows))
+
+    return image_tr, steer_ang
+
+
+def read_image(path):
+    img = cv2.imread(path)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    return img
 
 def data_generator(data, mode = GEN_MODE_CENTER, batch_size = 32, preprocess_input=normalize_input, shuffle = True):
     i = 0
@@ -65,28 +94,30 @@ def data_generator(data, mode = GEN_MODE_CENTER, batch_size = 32, preprocess_inp
         item = data.loc[i]
 
         angle = item.get('steering')
-        center = item.get('center')
-        left = item.get('left')
-        right = item.get('right')
+        center = item.get('center').strip()
+        left = item.get('left').strip()
+        right = item.get('right').strip()
 
         # read images and generate augmented images into the buffer
 
         if mode == GEN_MODE_CENTER:
             path = os.path.join(DATASET, center)
-            img = cv2.imread(path)
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = read_image(path)
             x_buffer.append(img)
             y_buffer.append(angle)
 
         elif mode == GEN_MODE_ALL:
-            img, ang = augment_angle(center, left, right, angle)
+            center_img = read_image(os.path.join(DATASET, center))
+            left_img = read_image(os.path.join(DATASET, left))
+            right_img = read_image(os.path.join(DATASET, right))
+            img, ang = augment_angle(center_img, left_img, right_img, angle, 0.05)
             [x_buffer.append(im) for im in img]
-            [y_buffer.append(an) for an in angle]
+            [y_buffer.append(an) for an in ang]
 
         elif mode == GEN_MODE_GEN:
             img, ang = augment_generate(center, left, right, angle)
             [x_buffer.append(im) for im in img]
-            [y_buffer.append(an) for an in angle]
+            [y_buffer.append(an) for an in ang]
 
         buffer_size = len(x_buffer)
 
@@ -119,7 +150,6 @@ def data_generator(data, mode = GEN_MODE_CENTER, batch_size = 32, preprocess_inp
 def nvidia_model():
     input_shape = (image_rows, image_columns, image_channels)
     model = Sequential()
-    #model.add(Lambda(lambda x: x/127.5 - 1.,input_shape = input_shape))
     model.add(Convolution2D(24, 5, 5, input_shape=input_shape, subsample=(2, 2), border_mode="valid", init='he_normal'))
     model.add(ELU())
     model.add(Convolution2D(36, 5, 5, subsample=(2, 2), border_mode="valid", init='he_normal'))
@@ -142,7 +172,8 @@ def nvidia_model():
     model.add(Dense(1, init='he_normal'))
     return model
 
-def unknown_model():
+
+def nvidia_model_modified():
     input_shape = (image_rows, image_columns, image_channels)
     model = Sequential()
     model.add(Convolution2D(24, 5, 5, input_shape=input_shape, subsample=(2, 2),
@@ -183,19 +214,29 @@ def unknown_model():
     return model
 
 
+# if __name__ == '__main__':
+#     data = pd.read_csv(os.path.join(DATASET, "driving_log.csv"))
+#
+#     train_genereator = data_generator(data, GEN_MODE_ALL, preprocess_input=preproccess, batch_size=BATCH_SIZE)
+#
+#     x,y = next(train_genereator)
+#     plt.figure(figsize=(32, 8))
+#     a = x[0].shape
+#     plt.imshow(x[0])
+#     plt.show()
+#
+#     print("End.")
+
+
 if __name__ == '__main__':
 
     data = pd.read_csv(os.path.join(DATASET, "driving_log.csv"))
 
-    train_genereator = data_generator(data, GEN_MODE_CENTER, preprocess_input=preproccess, batch_size=BATCH_SIZE)
+    train_genereator = data_generator(data, GEN_MODE_ALL, preprocess_input=preproccess, batch_size=BATCH_SIZE)
 
     model = nvidia_model()
     adam = Adam(lr=1e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
     model.compile(optimizer=adam, loss='mse')
-    #if weights_path:
-    #    model.load_weights(weights_path)
-
-    #model.summary()
 
     nb_train = len(data)
     samples_adj = BATCH_SIZE - (nb_train % BATCH_SIZE) if nb_train % BATCH_SIZE > 0 else 0
@@ -203,17 +244,8 @@ if __name__ == '__main__':
     model.fit_generator(train_genereator, samples_per_epoch=samples_per_epoch, nb_epoch=EPOCHS, verbose=1,
                         )#callbacks=callbacks)
 
-    # x,y = next(train_genereator)
-    # plt.figure(figsize=(32, 8))
-    # a = x[0].shape
-    # plt.imshow(x[0])
-    # plt.show()
     print("Saving model weights and configuration file.")
 
-    if not os.path.exists(OUTPUTS):
-        os.makedirs(OUTPUTS)
-
-    model.save_weights(os.path.join(OUTPUTS, "nvidia.h5"), True)
-    with open(os.path.join(OUTPUTS, "nvidia.json"), 'w') as outfile:
-        json.dump(model.to_json(), outfile)
-
+    model.save_weights("model.h5", True)
+    with open("model.json", 'w') as outfile:
+        outfile.write(model.to_json())
