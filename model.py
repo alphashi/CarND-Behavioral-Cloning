@@ -26,7 +26,7 @@ GEN_MODE_CENTER = 0
 # center camera + augmented left and right cameras are used
 GEN_MODE_ALL = 1
 # stich view from all cameras and sample many views with augmented angle
-GEN_MODE_GEN = 2
+GEN_MODE_AUGM = 2
 
 image_columns = 200
 image_rows = 66
@@ -38,10 +38,9 @@ def normalize_input(x):
 
 
 def resize_input(x):
-    cropped = x[66:152, 30:290,:]
+    cropped = x[49:135, 30:290,:]
     resized = cv2.resize(cropped, (200,66))
     return resized
-
 
 def preproccess(x):
     img = resize_input(x)
@@ -53,29 +52,39 @@ def passthrough(x):
     return x
 
 
-def augment_angle(center, left, right, angle, shift):
+def augment_angle(center, left, right, angle, angle_correction):
     images, angles = [], []
     images.append(center)
     angles.append(angle)
     images.append(left)
-    angles.append(angle + shift)
+    angles.append(angle + angle_correction)
     images.append(right)
-    angles.append(angle - shift)
+    angles.append(angle - angle_correction)
     return images, angles
 
 
-def augment_generate(center, left, right, angle):
-    return []
+def augment_generate(imgs, ang, trans_range):
+    images, angles = [], []
+
+    for _ in range(2): # generate 2 additional images per one camera, total = 6
+        for x, y in zip(imgs, ang):
+            i,a = trans_image(x, y, trans_range)
+            images.append(i)
+            angles.append(a)
+
+    return images, angles
 
 
 def trans_image(image, steer, trans_range):
+    rows = image.shape[0]
+    cols = image.shape[1]
     # Translation
     tr_x = trans_range * np.random.uniform() - trans_range / 2
-    steer_ang = steer + tr_x / trans_range * 2 * .2
-    tr_y = 40 * np.random.uniform() - 40 / 2
-    # tr_y = 0
+    steer_ang = steer + tr_x / trans_range  * 2 * .2
+    #tr_y = 40 * np.random.uniform() - 40 / 2
+    tr_y = 0
     Trans_M = np.float32([[1, 0, tr_x], [0, 1, tr_y]])
-    image_tr = cv2.warpAffine(image, Trans_M, (image_columns, image_rows))
+    image_tr = cv2.warpAffine(image, Trans_M, (cols, rows))
 
     return image_tr, steer_ang
 
@@ -110,12 +119,16 @@ def data_generator(data, mode = GEN_MODE_CENTER, batch_size = 32, preprocess_inp
             center_img = read_image(os.path.join(DATASET, center))
             left_img = read_image(os.path.join(DATASET, left))
             right_img = read_image(os.path.join(DATASET, right))
-            img, ang = augment_angle(center_img, left_img, right_img, angle, 0.05)
+            img, ang = augment_angle(center_img, left_img, right_img, angle, 0.25)
             [x_buffer.append(im) for im in img]
             [y_buffer.append(an) for an in ang]
 
-        elif mode == GEN_MODE_GEN:
-            img, ang = augment_generate(center, left, right, angle)
+        elif mode == GEN_MODE_AUGM:
+            center_img = read_image(os.path.join(DATASET, center))
+            left_img = read_image(os.path.join(DATASET, left))
+            right_img = read_image(os.path.join(DATASET, right))
+            augm_img, augm_ang = augment_angle(center_img, left_img, right_img, angle, 0.25)
+            img, ang = augment_generate(augm_img, augm_ang, 60)
             [x_buffer.append(im) for im in img]
             [y_buffer.append(an) for an in ang]
 
@@ -160,8 +173,8 @@ def nvidia_model():
     model.add(ELU())
     model.add(Convolution2D(64, 3, 3, subsample=(1, 1), border_mode="valid", init='he_normal'))
     model.add(Flatten())
-    model.add(ELU())
-    model.add(Dense(1164, init='he_normal'))
+    #model.add(ELU())
+    #model.add(Dense(1164, init='he_normal'))
     model.add(ELU())
     model.add(Dense(100, init='he_normal'))
     model.add(ELU())
@@ -217,7 +230,46 @@ def nvidia_model_modified():
 # if __name__ == '__main__':
 #     data = pd.read_csv(os.path.join(DATASET, "driving_log.csv"))
 #
-#     train_genereator = data_generator(data, GEN_MODE_ALL, preprocess_input=preproccess, batch_size=BATCH_SIZE)
+#     item = data.loc[30]
+#     angle = item.get('steering')
+#     center = item.get('center').strip()
+#     left = item.get('left').strip()
+#     right = item.get('right').strip()
+#
+#     path = os.path.join(DATASET, center)
+#     c = read_image(path)
+#
+#     image_columns = 320
+#     image_rows = 160
+#     c, ang = trans_image(c, 0.5, 60)
+#
+#     #c = resize_input(c)
+#
+#     fig, axes = plt.subplots()
+#     ax = axes
+#     ax.imshow(c)
+#
+#     c = resize_input(c)
+#     fig, axes = plt.subplots()
+#     ax = axes
+#     ax.imshow(c)
+#
+#     # path = os.path.join(DATASET, left)
+#     # l = read_image(path)
+#     # l = resize_input(l)
+#     #
+#     # fig, axes = plt.subplots()
+#     # ax = axes
+#     # ax.imshow(l)
+#
+#     plt.show()
+#
+#     print("End.")
+
+# if __name__ == '__main__':
+#     data = pd.read_csv(os.path.join(DATASET, "driving_log.csv"))
+#
+#     train_genereator = data_generator(data, GEN_MODE_AUGM, preprocess_input=preproccess, batch_size=BATCH_SIZE)
 #
 #     x,y = next(train_genereator)
 #     plt.figure(figsize=(32, 8))
@@ -232,13 +284,14 @@ if __name__ == '__main__':
 
     data = pd.read_csv(os.path.join(DATASET, "driving_log.csv"))
 
-    train_genereator = data_generator(data, GEN_MODE_ALL, preprocess_input=preproccess, batch_size=BATCH_SIZE)
+    train_genereator = data_generator(data, GEN_MODE_AUGM, preprocess_input=preproccess, batch_size=BATCH_SIZE)
 
     model = nvidia_model()
-    adam = Adam(lr=1e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
+    #adam = Adam(lr=1e-4, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
+    adam = Adam(lr=1e-4)
     model.compile(optimizer=adam, loss='mse')
 
-    nb_train = len(data)
+    nb_train = len(data) * 6 # 6 images per row_line
     samples_adj = BATCH_SIZE - (nb_train % BATCH_SIZE) if nb_train % BATCH_SIZE > 0 else 0
     samples_per_epoch = nb_train + samples_adj
     model.fit_generator(train_genereator, samples_per_epoch=samples_per_epoch, nb_epoch=EPOCHS, verbose=1,
