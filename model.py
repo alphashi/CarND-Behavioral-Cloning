@@ -59,7 +59,7 @@ def prepare(data):
 def model():
     model = Sequential()
     model.add(Lambda(lambda x: x / 127.5 - 1.0, input_shape=(image_rows, image_columns, image_channels)))
-    model.add(Conv2D(2, 3, 3, border_mode='valid', activation='relu'))
+    model.add(Conv2D(2, 3, 3, border_mode='valid', activation='elu'))
     model.add(MaxPooling2D((4, 4), (4, 4), 'valid'))
     model.add(Dropout(0.25))
     model.add(Flatten())

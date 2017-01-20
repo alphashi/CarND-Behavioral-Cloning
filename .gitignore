@@ -3,3 +3,5 @@ __pycache__
 dataset/*
 tmp
 data.zip
+ex.py
+*.mp4

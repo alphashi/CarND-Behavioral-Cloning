@@ -16,9 +16,17 @@ the real world. There is not much varying in shadowed areas, surface of the road
 <a href="http://www.youtube.com/watch?feature=player_embedded&v=fYcwJP4lei4
 " target="_blank"><img src="http://img.youtube.com/vi/fYcwJP4lei4/0.jpg"
 alt="youtube link" width="480" height="360" border="10" /></a>
+<br>
+<br>
+The model also works on the test track.
+<br>
+<br>
+<a href="http://www.youtube.com/watch?feature=player_embedded&v=xivMFiIsGMg
+" target="_blank"><img src="http://img.youtube.com/vi/xivMFiIsGMg/0.jpg"
+alt="youtube link" width="480" height="360" border="10" /></a>
 </div>
 
-The model also works on the test track.
+
 
 ### Model
 
@@ -53,6 +61,12 @@ Layers:
 + **Flatten** - converting output of convolutional part of the CNN into a 1D feature vector.
 + **Dense** - regression output - the steering angle.
 
+Small insight into the model:
+
+![](https://github.com/michalfaber/CarND-Behavioral-Cloning/raw/master/model_visualization.gif)
+
+Top row represents original image.
+Bottom row contains 3 images, respectively original image, preprocessed image, weights at flatten layer
 
 ### Dataset
 
@@ -75,6 +89,8 @@ such significant size reduction all data fits nicely in memory, training is fast
 ### Training
 
 Adam optimizer has been used with default configuration.
+
+Model checkpoint and early stopping (20 - 25 epochs)
 
 15% of data is used as a validation set.
 
